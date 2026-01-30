@@ -1,0 +1,218 @@
+{
+  "main": {
+    "id": "6ca025b15dd28549",
+    "type": "split",
+    "children": [
+      {
+        "id": "89cfd43a4e2b3fc2",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "8024343f5d2555ce",
+            "type": "leaf",
+            "state": {
+              "type": "empty",
+              "state": {},
+              "icon": "lucide-file",
+              "title": "New tab"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "8bc2348d6aad8916",
+    "type": "split",
+    "children": [
+      {
+        "id": "1545718df36f52c5",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "aeafc351f885ebb1",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "42ad7b18433d86c2",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "714e1e23f4571fb0",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "5ab677a4e1b1b101",
+    "type": "split",
+    "children": [
+      {
+        "id": "290b3121057c337a",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "7e26ff85a5324757",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "3. Projects/Reference/SatSystem/Spotkanie oprogramowanie.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for Spotkanie oprogramowanie"
+            }
+          },
+          {
+            "id": "c037c63a39880b15",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "3. Projects/Reference/SatSystem/Spotkanie oprogramowanie.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from Spotkanie oprogramowanie"
+            }
+          },
+          {
+            "id": "ce41c6c821abdd46",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "fcfa60d6f6234068",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "3. Projects/Reference/SatSystem/Spotkanie oprogramowanie.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of Spotkanie oprogramowanie"
+            }
+          },
+          {
+            "id": "5ebc24f579d30a93",
+            "type": "leaf",
+            "state": {
+              "type": "calendar",
+              "state": {},
+              "icon": "calendar-with-checkmark",
+              "title": "Calendar"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "bases:Create new base": false,
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "table-editor-obsidian:Advanced Tables Toolbar": false
+    }
+  },
+  "active": "aeafc351f885ebb1",
+  "lastOpenFiles": [
+    "3. Projects/Active/Organizacja zadan GTD.md",
+    "1. Inbox/Husar Display - rozmowa Paweł Obrzud.md",
+    "1. Inbox/Husar Display - weryfikacja CSDIP.md",
+    "1. Inbox/Kimi K2 i AI development tools.md",
+    "1. Inbox/Ryzen 9 Max - AliExpress.md",
+    "1. Inbox/git cliff.md",
+    "1. Inbox/Husar Display - mapowanie jasności.md",
+    "1. Inbox/Biblioteki komponentów shadcn.md",
+    "1. Inbox/Spodnie Pakker III generacja.md",
+    "1. Inbox/Video Analysis - AliExpress System.md",
+    "1. Inbox/Nawóz do kwiatków.md",
+    "1. Inbox/Husar Display - zrzut danych Warszawa Wschodnia.md",
+    "1. Inbox/warka sprawdzić dlaczego nie ma pociągu 1306 San.md",
+    "1. Inbox/Wskaźnik CPI (inflacja bazowa).md",
+    "1. Inbox/zadzwoń do Przemka.md",
+    "1. Inbox/zniżka z Temu, warto?.md",
+    "1. Inbox/Sterowanie zegarkami po SNMP.md",
+    "1. Inbox/przejście na neovim.md",
+    "1. Inbox/Montaż okien.md",
+    "5. Reference/README.md",
+    "5. Reference/NAS Implementation Links.md",
+    "5. Reference/Git Cliff Documentation.md",
+    "4. Someday Maybe/Enhanced List.md",
+    "3. Projects/Reference/SatSystem/System Husar/Backlog.md",
+    "3. Projects/Reference/SatSystem/Spotkanie oprogramowanie.md",
+    "3. Projects/Reference/Nieruchomości/Tokarnia.md",
+    "0. GTD System/Areas",
+    "6. Weekly Reviews",
+    "5. Reference",
+    "3. Projects/Templates",
+    "3. Projects/Archive",
+    "3. Projects/Active",
+    "2. Next Actions/@waiting",
+    "2. Next Actions/@office",
+    "2. Next Actions/@home",
+    "2. Next Actions/@errands"
+  ]
+}
