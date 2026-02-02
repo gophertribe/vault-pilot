@@ -61,6 +61,34 @@ func (d *DB) InitSchema() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+
+	CREATE TABLE IF NOT EXISTS calendar_sync (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		event_id TEXT NOT NULL UNIQUE,
+		vault_path TEXT NOT NULL,
+		sync_key TEXT NOT NULL,
+		direction TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS drive_sync (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		drive_file_id TEXT NOT NULL UNIQUE,
+		local_path TEXT NOT NULL,
+		last_synced_at DATETIME NOT NULL,
+		direction TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS drive_watch (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		drive_file_id TEXT NOT NULL UNIQUE,
+		file_name TEXT NOT NULL,
+		processed_at DATETIME NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 
 	_, err := d.Exec(schema)

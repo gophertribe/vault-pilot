@@ -3,15 +3,21 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/mklimuk/vault-pilot/pkg/ai"
 	"github.com/mklimuk/vault-pilot/pkg/api"
 	"github.com/mklimuk/vault-pilot/pkg/db"
+	"github.com/mklimuk/vault-pilot/pkg/integration/calendar"
 	"github.com/mklimuk/vault-pilot/pkg/integration/discord"
+	"github.com/mklimuk/vault-pilot/pkg/integration/drive"
+	"github.com/mklimuk/vault-pilot/pkg/integration/gmail"
+	googleauth "github.com/mklimuk/vault-pilot/pkg/integration/google"
 	"github.com/mklimuk/vault-pilot/pkg/integration/telegram"
 	"github.com/mklimuk/vault-pilot/pkg/sync"
 	"github.com/mklimuk/vault-pilot/pkg/vault"
@@ -76,41 +82,106 @@ func main() {
 	// Initialize Router
 	router := api.NewRouter(repo, aiClient, tmplEngine, *vaultPath, gitManager)
 
-	// Initialize Gmail Integration (Optional)
-	// For MVP, we'll just log if it fails or skip if no credentials
-	// We need an authenticated HTTP client. In a real app, this comes from OAuth flow.
-	// Here we just skip it to avoid crashing if not configured, or we could try to use a service account if path provided.
-	// Since we don't have a ready-to-use client, we'll comment out the actual start but show the logic.
-	// To make it work, user would need to implement the auth flow in client.go.
+	// Google service account key — shared by Calendar, Drive, and Gmail
+	googleKeyFile := os.Getenv("GOOGLE_SERVICE_ACCOUNT_KEY")
 
-	// Placeholder for when we have a client:
-	/*
-		gmailClient, err := gmail.NewService(ctx, someHttpClient)
-		if err == nil {
-			poller := gmail.NewPoller(gmailClient, 5*time.Minute, func(subject, body string) error {
-				log.Printf("Received email: %s", subject)
-
-				// Analyze with AI
-				prompt := ai.AnalyzeInboxPrompt(fmt.Sprintf("Subject: %s\nBody: %s", subject, body))
-				analysisJSON, err := aiClient.GenerateText(context.Background(), prompt)
-				if err != nil {
-					return fmt.Errorf("AI analysis failed: %w", err)
-				}
-
-				// Parse JSON (simplified)
-				// ... (reuse cleanJSON and unmarshal logic) ...
-
-				// Create Item
-				// err = vault.CreateInboxItem(*vaultPath, tmplEngine, title, description)
-
-				// Sync
-				// gitManager.Sync("Add email item")
-
-				return nil
-			})
-			go poller.Start()
+	// Initialize Google Calendar Sync (Optional)
+	calendarID := os.Getenv("GOOGLE_CALENDAR_ID")
+	if googleKeyFile != "" && calendarID != "" {
+		ctx := context.Background()
+		calSvc, err := calendar.NewService(ctx, googleKeyFile, calendarID)
+		if err != nil {
+			log.Printf("Failed to create Calendar service: %v", err)
+		} else {
+			calSyncer := calendar.NewSyncer(calSvc, repo, *vaultPath, tmplEngine, gitManager,
+				15*time.Minute, 14*24*time.Hour)
+			if err := calSyncer.Start(); err != nil {
+				log.Printf("Failed to start Calendar syncer: %v", err)
+			} else {
+				log.Println("Google Calendar sync started")
+				defer calSyncer.Stop()
+			}
 		}
-	*/
+	}
+
+	// Initialize Google Drive Backup (Optional)
+	driveBackupFolderID := os.Getenv("GOOGLE_DRIVE_BACKUP_FOLDER_ID")
+	if googleKeyFile != "" && driveBackupFolderID != "" {
+		ctx := context.Background()
+		drvSvc, err := drive.NewService(ctx, googleKeyFile, driveBackupFolderID)
+		if err != nil {
+			log.Printf("Failed to create Drive backup service: %v", err)
+		} else {
+			backup := drive.NewBackup(drvSvc, repo, *vaultPath, 30*time.Minute)
+			if err := backup.Start(); err != nil {
+				log.Printf("Failed to start Drive backup: %v", err)
+			} else {
+				log.Println("Google Drive backup started")
+				defer backup.Stop()
+			}
+		}
+	}
+
+	// Initialize Google Drive Watcher (Optional)
+	driveWatchFolderID := os.Getenv("GOOGLE_DRIVE_WATCH_FOLDER_ID")
+	if googleKeyFile != "" && driveWatchFolderID != "" {
+		ctx := context.Background()
+		drvSvc, err := drive.NewService(ctx, googleKeyFile, driveWatchFolderID)
+		if err != nil {
+			log.Printf("Failed to create Drive watch service: %v", err)
+		} else {
+			watcher := drive.NewWatcher(drvSvc, repo, *vaultPath, tmplEngine, gitManager, 5*time.Minute)
+			if err := watcher.Start(); err != nil {
+				log.Printf("Failed to start Drive watcher: %v", err)
+			} else {
+				log.Println("Google Drive watcher started")
+				defer watcher.Stop()
+			}
+		}
+	}
+
+	// Initialize Gmail Integration (Optional)
+	if googleKeyFile != "" {
+		ctx := context.Background()
+		httpClient, err := googleauth.NewHTTPClient(ctx, googleKeyFile,
+			"https://www.googleapis.com/auth/gmail.readonly",
+			"https://www.googleapis.com/auth/gmail.modify")
+		if err != nil {
+			log.Printf("Failed to create Gmail HTTP client: %v", err)
+		} else {
+			gmailSvc, err := gmail.NewService(ctx, httpClient)
+			if err != nil {
+				log.Printf("Failed to create Gmail service: %v", err)
+			} else {
+				poller := gmail.NewPoller(gmailSvc, 5*time.Minute, func(subject, body string) error {
+					log.Printf("Received email: %s", subject)
+
+					prompt := ai.AnalyzeInboxPrompt(fmt.Sprintf("Subject: %s\nBody: %s", subject, body))
+					analysisJSON, err := aiClient.GenerateText(context.Background(), prompt)
+					if err != nil {
+						return fmt.Errorf("AI analysis failed: %w", err)
+					}
+
+					// Use subject as title, analysis as content
+					title := subject
+					if title == "" {
+						title = "Email Item"
+					}
+					content := fmt.Sprintf("AI Analysis:\n%s\n\nOriginal:\n%s", analysisJSON, body)
+
+					if err := vault.CreateInboxItem(*vaultPath, tmplEngine, title, content); err != nil {
+						return fmt.Errorf("create inbox item: %w", err)
+					}
+
+					go gitManager.Sync("Add email item: " + title)
+					return nil
+				})
+				go poller.Start()
+				defer poller.Stop()
+				log.Println("Gmail poller started")
+			}
+		}
+	}
 
 	// Initialize Discord Bot (Optional)
 	discordToken := os.Getenv("DISCORD_TOKEN")

@@ -61,7 +61,7 @@ func CreateInboxItem(vaultPath string, templateEngine *TemplateEngine, title str
 	}
 
 	// Generate Filename (sanitize title)
-	filename := sanitizeFilename(title) + ".md"
+	filename := SanitizeFilename(title) + ".md"
 	path := filepath.Join(vaultPath, "1. Inbox", filename)
 
 	// Write to file
@@ -72,7 +72,8 @@ func CreateInboxItem(vaultPath string, templateEngine *TemplateEngine, title str
 	return ioutil.WriteFile(path, []byte(rendered), 0644)
 }
 
-func sanitizeFilename(name string) string {
+// SanitizeFilename removes characters invalid in filenames.
+func SanitizeFilename(name string) string {
 	// Simple sanitization
 	invalid := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
 	for _, char := range invalid {

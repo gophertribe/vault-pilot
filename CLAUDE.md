@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Vault Pilot is a Go backend for managing a GTD (Getting Things Done) Obsidian vault. It provides an HTTP API for AI-driven inbox processing and weekly reviews, Git-based sync, and integrations with Discord and Gmail. See DESIGN.md for the full architecture.
+Vault Pilot is a Go backend for managing a GTD (Getting Things Done) Obsidian vault. It provides an HTTP API for AI-driven inbox processing and weekly reviews, Git-based sync, and integrations with Discord, Gmail, Google Calendar, and Google Drive. See DESIGN.md for the full architecture.
 
 ## Build & Test Commands
 
@@ -26,6 +26,15 @@ GEMINI_API_KEY=... ./vault-pilot -vault /path/to/vault -port 8080 -db vault-pilo
 
 # Run the server with Moonshot (Kimi 2.5)
 MOONSHOT_API_KEY=... ./vault-pilot -vault /path/to/vault -port 8080 -db vault-pilot.db -ai-provider moonshot
+
+# Run with Google Calendar sync
+GEMINI_API_KEY=... GOOGLE_SERVICE_ACCOUNT_KEY=/path/to/sa.json GOOGLE_CALENDAR_ID=primary \
+  ./vault-pilot -vault /path/to/vault -port 8080 -db vault-pilot.db
+
+# Run with Google Drive backup + watch
+GEMINI_API_KEY=... GOOGLE_SERVICE_ACCOUNT_KEY=/path/to/sa.json \
+  GOOGLE_DRIVE_BACKUP_FOLDER_ID=folder-id GOOGLE_DRIVE_WATCH_FOLDER_ID=folder-id \
+  ./vault-pilot -vault /path/to/vault -port 8080 -db vault-pilot.db
 ```
 
 ## Architecture
@@ -46,8 +55,11 @@ The app follows a layered architecture where the HTTP API layer orchestrates bet
 - **`pkg/vault`** - File-level operations on the Obsidian vault. `ReadNote` parses YAML frontmatter + markdown body into a `Note` struct. `WriteNote` serializes back. `TemplateEngine` loads `.md` templates from the vault's `0. GTD System/Templates/` directory and renders `{{title}}` and `{{date:FORMAT}}` placeholders (Moment.js format converted to Go time format).
 - **`pkg/db`** - SQLite via `mattn/go-sqlite3` (CGO required). Schema is initialized inline in `InitSchema()` (no migration tool yet). `Repository` provides data access methods.
 - **`pkg/sync`** - Git operations via `go-git`. `Sync()` stages all, commits, and pushes (SSH auth with fallback).
+- **`pkg/integration/google`** - Shared Google service account auth (`NewHTTPClient` for OAuth-style APIs, `ClientOption` for service constructors). Used by Calendar, Drive, and Gmail integrations.
+- **`pkg/integration/calendar`** - Bidirectional Google Calendar sync. `Service` wraps the Calendar API behind a `CalendarAPI` interface. `Syncer` runs a periodic loop that pulls events into `2. Next Actions/@calendar/` notes and pushes vault notes with `due_date` to Calendar.
+- **`pkg/integration/drive`** - Google Drive backup and watch. `Service` wraps the Drive API behind a `DriveAPI` interface. `Backup` incrementally uploads `.md` files to a Drive folder. `Watcher` monitors a Drive folder for new files and creates inbox items.
 - **`pkg/integration/discord`** - Discord bot via `bwmarrin/discordgo`. Commands: `!inbox <text>`, `!status`.
-- **`pkg/integration/gmail`** - Gmail polling (architecture ready, OAuth flow not implemented).
+- **`pkg/integration/gmail`** - Gmail polling using service account auth. Fetches unread emails, analyzes with AI, and creates inbox items.
 
 ### Testing Pattern
 
@@ -70,5 +82,9 @@ All vault notes use YAML frontmatter. The `Note.Frontmatter` field is `interface
 
 - `GEMINI_API_KEY` (required if `-ai-provider gemini`) - Google Gemini API key
 - `MOONSHOT_API_KEY` (required if `-ai-provider moonshot`) - Moonshot API key for Kimi 2.5
+- `GOOGLE_SERVICE_ACCOUNT_KEY` (optional) - Path to Google service account JSON key file. Required for Calendar, Drive, and Gmail integrations.
+- `GOOGLE_CALENDAR_ID` (optional, requires `GOOGLE_SERVICE_ACCOUNT_KEY`) - Calendar ID for bidirectional sync (e.g., `primary`)
+- `GOOGLE_DRIVE_BACKUP_FOLDER_ID` (optional, requires `GOOGLE_SERVICE_ACCOUNT_KEY`) - Drive folder ID for vault backup
+- `GOOGLE_DRIVE_WATCH_FOLDER_ID` (optional, requires `GOOGLE_SERVICE_ACCOUNT_KEY`) - Drive folder ID to watch for incoming files
 - `DISCORD_TOKEN` (optional) - enables Discord bot
 - `TELEGRAM_TOKEN` (optional) - enables Telegram bot
