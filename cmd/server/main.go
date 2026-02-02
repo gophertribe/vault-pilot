@@ -12,6 +12,7 @@ import (
 	"github.com/mklimuk/vault-pilot/pkg/api"
 	"github.com/mklimuk/vault-pilot/pkg/db"
 	"github.com/mklimuk/vault-pilot/pkg/integration/discord"
+	"github.com/mklimuk/vault-pilot/pkg/integration/telegram"
 	"github.com/mklimuk/vault-pilot/pkg/sync"
 	"github.com/mklimuk/vault-pilot/pkg/vault"
 )
@@ -20,15 +21,11 @@ func main() {
 	vaultPath := flag.String("vault", "", "Path to Obsidian Vault")
 	dbPath := flag.String("db", "vault-pilot.db", "Path to SQLite DB")
 	port := flag.String("port", "8080", "HTTP Port")
+	aiProvider := flag.String("ai-provider", "gemini", "AI provider: gemini or moonshot")
 	flag.Parse()
 
 	if *vaultPath == "" {
 		log.Fatal("Please provide -vault path")
-	}
-
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		log.Fatal("GEMINI_API_KEY environment variable is required")
 	}
 
 	// Initialize DB
@@ -45,12 +42,29 @@ func main() {
 	repo := db.NewRepository(database)
 
 	// Initialize AI Client
-	ctx := context.Background()
-	aiClient, err := ai.NewClient(ctx, apiKey)
-	if err != nil {
-		log.Fatalf("Failed to create AI client: %v", err)
+	var aiClient ai.Generator
+	switch *aiProvider {
+	case "moonshot":
+		key := os.Getenv("MOONSHOT_API_KEY")
+		if key == "" {
+			log.Fatal("MOONSHOT_API_KEY environment variable is required when using moonshot provider")
+		}
+		aiClient = ai.NewMoonshotClient(key)
+	case "gemini":
+		key := os.Getenv("GEMINI_API_KEY")
+		if key == "" {
+			log.Fatal("GEMINI_API_KEY environment variable is required when using gemini provider")
+		}
+		ctx := context.Background()
+		geminiClient, err := ai.NewClient(ctx, key)
+		if err != nil {
+			log.Fatalf("Failed to create AI client: %v", err)
+		}
+		defer geminiClient.Close()
+		aiClient = geminiClient
+	default:
+		log.Fatalf("Unknown AI provider: %s", *aiProvider)
 	}
-	defer aiClient.Close()
 
 	// Initialize Template Engine
 	templateDir := filepath.Join(*vaultPath, "0. GTD System", "Templates")
@@ -110,6 +124,22 @@ func main() {
 			} else {
 				log.Println("Discord Bot started")
 				defer bot.Stop()
+			}
+		}
+	}
+
+	// Initialize Telegram Bot (Optional)
+	telegramToken := os.Getenv("TELEGRAM_TOKEN")
+	if telegramToken != "" {
+		tgBot, err := telegram.NewBot(telegramToken, *vaultPath, tmplEngine, gitManager)
+		if err != nil {
+			log.Printf("Failed to create Telegram bot: %v", err)
+		} else {
+			if err := tgBot.Start(); err != nil {
+				log.Printf("Failed to start Telegram bot: %v", err)
+			} else {
+				log.Println("Telegram Bot started")
+				defer tgBot.Stop()
 			}
 		}
 	}
