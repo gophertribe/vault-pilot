@@ -4,7 +4,7 @@ A Go-based backend system for managing GTD (Getting Things Done) Obsidian vaults
 
 ## Features
 
-- 🤖 **AI-Powered**: Uses Google Gemini to analyze and process inbox items
+- 🤖 **AI-Powered**: Uses Gemini, Moonshot, OpenAI, or Anthropic to analyze and process inbox items
 - 📝 **Template Engine**: Automatic note creation with your GTD templates
 - 🔄 **Git Sync**: Automatic commits and pushes after changes
 - 💬 **Discord Bot**: Capture ideas directly from Discord
@@ -16,7 +16,7 @@ A Go-based backend system for managing GTD (Getting Things Done) Obsidian vaults
 ### Prerequisites
 - Go 1.22 or higher
 - A Git-initialized Obsidian vault
-- Google Gemini API key
+- API key for your selected AI provider
 
 ### Installation
 
@@ -32,6 +32,12 @@ export GEMINI_API_KEY="your-gemini-api-key"
 
 # Run the server
 ./vault-pilot -vault /path/to/your/vault -port 8080
+
+# Optional: run with OpenAI
+OPENAI_API_KEY="your-openai-api-key" ./vault-pilot -vault /path/to/your/vault -ai-provider openai
+
+# Optional: run with Anthropic
+ANTHROPIC_API_KEY="your-anthropic-api-key" ./vault-pilot -vault /path/to/your/vault -ai-provider anthropic
 ```
 
 ### API Endpoints
@@ -76,7 +82,7 @@ See [DESIGN.md](DESIGN.md) for detailed architecture documentation.
 - `cmd/server/` - Main application entry point
 - `pkg/vault/` - Core vault operations (read/write/template)
 - `pkg/api/` - HTTP handlers and routing
-- `pkg/ai/` - Gemini API integration
+- `pkg/ai/` - AI provider integrations (Gemini, Moonshot, OpenAI, Anthropic)
 - `pkg/db/` - SQLite database layer
 - `pkg/sync/` - Git synchronization
 - `pkg/integration/` - Gmail and Discord integrations
@@ -97,9 +103,13 @@ The server accepts the following flags:
 - `-vault` - Path to your Obsidian vault (required)
 - `-port` - HTTP port (default: 8080)
 - `-db` - SQLite database path (default: vault-pilot.db)
+- `-ai-provider` - AI provider (`gemini`, `moonshot`, `openai`, `anthropic`; default: `gemini`)
 
 Environment variables:
-- `GEMINI_API_KEY` - Google Gemini API key (required)
+- `GEMINI_API_KEY` - Google Gemini API key (required if `-ai-provider gemini`)
+- `MOONSHOT_API_KEY` - Moonshot API key (required if `-ai-provider moonshot`)
+- `OPENAI_API_KEY` - OpenAI API key (required if `-ai-provider openai`)
+- `ANTHROPIC_API_KEY` - Anthropic API key (required if `-ai-provider anthropic`)
 - `DISCORD_TOKEN` - Discord bot token (optional)
 
 ## Development
@@ -108,6 +118,7 @@ Built with:
 - Go 1.22+ (utilizing new routing features)
 - `go-git` for Git operations
 - `google/generative-ai-go` for Gemini
+- HTTP APIs for Moonshot/OpenAI/Anthropic providers
 - `bwmarrin/discordgo` for Discord
 - SQLite for state management
 

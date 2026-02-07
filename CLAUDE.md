@@ -27,6 +27,12 @@ GEMINI_API_KEY=... ./vault-pilot -vault /path/to/vault -port 8080 -db vault-pilo
 # Run the server with Moonshot (Kimi 2.5)
 MOONSHOT_API_KEY=... ./vault-pilot -vault /path/to/vault -port 8080 -db vault-pilot.db -ai-provider moonshot
 
+# Run the server with OpenAI
+OPENAI_API_KEY=... ./vault-pilot -vault /path/to/vault -port 8080 -db vault-pilot.db -ai-provider openai
+
+# Run the server with Anthropic
+ANTHROPIC_API_KEY=... ./vault-pilot -vault /path/to/vault -port 8080 -db vault-pilot.db -ai-provider anthropic
+
 # Run with Google Calendar sync
 GEMINI_API_KEY=... GOOGLE_SERVICE_ACCOUNT_KEY=/path/to/sa.json GOOGLE_CALENDAR_ID=primary \
   ./vault-pilot -vault /path/to/vault -port 8080 -db vault-pilot.db
@@ -44,14 +50,14 @@ The app follows a layered architecture where the HTTP API layer orchestrates bet
 ### Request Flow (e.g., POST /inbox)
 
 1. `pkg/api/handler.go` receives the request
-2. Calls `pkg/ai` to analyze content via Gemini, which returns structured JSON
+2. Calls `pkg/ai` to analyze content via the selected provider, which returns structured JSON
 3. Calls `pkg/vault` to write a markdown file from a template into the vault directory
 4. Fires async Git sync via `pkg/sync` (goroutine)
 
 ### Key Layers
 
 - **`pkg/api`** - HTTP handlers and routing using Go 1.22+ `net/http` method-based routing (`"POST /inbox"`, etc.). The `Handler` struct holds all dependencies (repo, AI client, template engine, vault path, git manager).
-- **`pkg/ai`** - AI text generation behind the `Generator` interface (`GenerateText(ctx, prompt) (string, error)`). Implementations: `Client` (Google Gemini via `google/generative-ai-go`) and `MoonshotClient` (Moonshot/Kimi 2.5 via OpenAI-compatible HTTP API). Provider is selected with `-ai-provider` flag. Prompt templates live in `prompts.go`.
+- **`pkg/ai`** - AI text generation behind the `Generator` interface (`GenerateText(ctx, prompt) (string, error)`). Implementations: `Client` (Google Gemini via `google/generative-ai-go`), `MoonshotClient` (Moonshot/Kimi 2.5 via OpenAI-compatible HTTP API), `OpenAIClient` (OpenAI chat completions API), and `AnthropicClient` (Anthropic messages API). Provider is selected with `-ai-provider` flag. Prompt templates live in `prompts.go`.
 - **`pkg/vault`** - File-level operations on the Obsidian vault. `ReadNote` parses YAML frontmatter + markdown body into a `Note` struct. `WriteNote` serializes back. `TemplateEngine` loads `.md` templates from the vault's `0. GTD System/Templates/` directory and renders `{{title}}` and `{{date:FORMAT}}` placeholders (Moment.js format converted to Go time format).
 - **`pkg/db`** - SQLite via `mattn/go-sqlite3` (CGO required). Schema is initialized inline in `InitSchema()` (no migration tool yet). `Repository` provides data access methods.
 - **`pkg/sync`** - Git operations via `go-git`. `Sync()` stages all, commits, and pushes (SSH auth with fallback).
@@ -82,6 +88,8 @@ All vault notes use YAML frontmatter. The `Note.Frontmatter` field is `interface
 
 - `GEMINI_API_KEY` (required if `-ai-provider gemini`) - Google Gemini API key
 - `MOONSHOT_API_KEY` (required if `-ai-provider moonshot`) - Moonshot API key for Kimi 2.5
+- `OPENAI_API_KEY` (required if `-ai-provider openai`) - OpenAI API key
+- `ANTHROPIC_API_KEY` (required if `-ai-provider anthropic`) - Anthropic API key
 - `GOOGLE_SERVICE_ACCOUNT_KEY` (optional) - Path to Google service account JSON key file. Required for Calendar, Drive, and Gmail integrations.
 - `GOOGLE_CALENDAR_ID` (optional, requires `GOOGLE_SERVICE_ACCOUNT_KEY`) - Calendar ID for bidirectional sync (e.g., `primary`)
 - `GOOGLE_DRIVE_BACKUP_FOLDER_ID` (optional, requires `GOOGLE_SERVICE_ACCOUNT_KEY`) - Drive folder ID for vault backup

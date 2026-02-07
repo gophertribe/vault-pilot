@@ -27,7 +27,7 @@ func main() {
 	vaultPath := flag.String("vault", "", "Path to Obsidian Vault")
 	dbPath := flag.String("db", "vault-pilot.db", "Path to SQLite DB")
 	port := flag.String("port", "8080", "HTTP Port")
-	aiProvider := flag.String("ai-provider", "gemini", "AI provider: gemini or moonshot")
+	aiProvider := flag.String("ai-provider", "gemini", "AI provider: gemini, moonshot, openai, or anthropic")
 	flag.Parse()
 
 	if *vaultPath == "" {
@@ -56,6 +56,18 @@ func main() {
 			log.Fatal("MOONSHOT_API_KEY environment variable is required when using moonshot provider")
 		}
 		aiClient = ai.NewMoonshotClient(key)
+	case "openai":
+		key := os.Getenv("OPENAI_API_KEY")
+		if key == "" {
+			log.Fatal("OPENAI_API_KEY environment variable is required when using openai provider")
+		}
+		aiClient = ai.NewOpenAIClient(key)
+	case "anthropic":
+		key := os.Getenv("ANTHROPIC_API_KEY")
+		if key == "" {
+			log.Fatal("ANTHROPIC_API_KEY environment variable is required when using anthropic provider")
+		}
+		aiClient = ai.NewAnthropicClient(key)
 	case "gemini":
 		key := os.Getenv("GEMINI_API_KEY")
 		if key == "" {
