@@ -50,6 +50,293 @@ func (r *Repository) GetLatestReview() (*ReviewLog, error) {
 	return &log, nil
 }
 
+// AutomationDefinition represents a scheduled automation configuration.
+type AutomationDefinition struct {
+	ID           int64      `json:"id"`
+	Name         string     `json:"name"`
+	ActionType   string     `json:"action_type"`
+	ScheduleKind string     `json:"schedule_kind"`
+	ScheduleExpr string     `json:"schedule_expr"`
+	Timezone     string     `json:"timezone"`
+	PayloadJSON  string     `json:"payload_json"`
+	Enabled      bool       `json:"enabled"`
+	NextRunAt    *time.Time `json:"next_run_at,omitempty"`
+	LastRunAt    *time.Time `json:"last_run_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// AutomationRun represents an execution attempt of an automation definition.
+type AutomationRun struct {
+	ID           int64      `json:"id"`
+	AutomationID int64      `json:"automation_id"`
+	ScheduledAt  time.Time  `json:"scheduled_at"`
+	StartedAt    time.Time  `json:"started_at"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	Status       string     `json:"status"`
+	Error        string     `json:"error,omitempty"`
+	Output       string     `json:"output,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+// CreateAutomation inserts a new automation definition.
+func (r *Repository) CreateAutomation(def *AutomationDefinition) (int64, error) {
+	query := `
+		INSERT INTO automations
+			(name, action_type, schedule_kind, schedule_expr, timezone, payload_json, enabled, next_run_at, last_run_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+	var nextRun interface{}
+	if def.NextRunAt != nil {
+		nextRun = *def.NextRunAt
+	}
+	var lastRun interface{}
+	if def.LastRunAt != nil {
+		lastRun = *def.LastRunAt
+	}
+	result, err := r.db.Exec(
+		query,
+		def.Name,
+		def.ActionType,
+		def.ScheduleKind,
+		def.ScheduleExpr,
+		def.Timezone,
+		def.PayloadJSON,
+		boolToInt(def.Enabled),
+		nextRun,
+		lastRun,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create automation: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to read automation id: %w", err)
+	}
+	return id, nil
+}
+
+// ListAutomations returns all automation definitions.
+func (r *Repository) ListAutomations() ([]AutomationDefinition, error) {
+	query := `
+		SELECT id, name, action_type, schedule_kind, schedule_expr, timezone, payload_json,
+		       enabled, next_run_at, last_run_at, created_at, updated_at
+		FROM automations
+		ORDER BY created_at DESC, id DESC
+	`
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list automations: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AutomationDefinition
+	for rows.Next() {
+		def, err := scanAutomationDefinition(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *def)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to list automations rows: %w", err)
+	}
+	return out, nil
+}
+
+// GetAutomationByID returns a single automation definition by ID.
+func (r *Repository) GetAutomationByID(id int64) (*AutomationDefinition, error) {
+	query := `
+		SELECT id, name, action_type, schedule_kind, schedule_expr, timezone, payload_json,
+		       enabled, next_run_at, last_run_at, created_at, updated_at
+		FROM automations
+		WHERE id = ?
+	`
+	row := r.db.QueryRow(query, id)
+	def, err := scanAutomationDefinition(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get automation: %w", err)
+	}
+	return def, nil
+}
+
+// UpdateAutomation updates an existing automation definition by ID.
+func (r *Repository) UpdateAutomation(def *AutomationDefinition) error {
+	query := `
+		UPDATE automations
+		SET name = ?, action_type = ?, schedule_kind = ?, schedule_expr = ?, timezone = ?,
+		    payload_json = ?, enabled = ?, next_run_at = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`
+	var nextRun interface{}
+	if def.NextRunAt != nil {
+		nextRun = *def.NextRunAt
+	}
+	_, err := r.db.Exec(
+		query,
+		def.Name,
+		def.ActionType,
+		def.ScheduleKind,
+		def.ScheduleExpr,
+		def.Timezone,
+		def.PayloadJSON,
+		boolToInt(def.Enabled),
+		nextRun,
+		def.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update automation: %w", err)
+	}
+	return nil
+}
+
+// TriggerAutomationNow sets the next_run_at to now for a definition.
+func (r *Repository) TriggerAutomationNow(id int64, now time.Time) error {
+	query := `UPDATE automations SET next_run_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+	_, err := r.db.Exec(query, now, id)
+	if err != nil {
+		return fmt.Errorf("failed to trigger automation: %w", err)
+	}
+	return nil
+}
+
+// ClaimDueAutomations atomically claims due tasks and returns claimed definitions.
+func (r *Repository) ClaimDueAutomations(now time.Time, limit int) ([]AutomationDefinition, error) {
+	query := `
+		WITH due AS (
+			SELECT id
+			FROM automations
+			WHERE enabled = 1
+			  AND next_run_at IS NOT NULL
+			  AND next_run_at <= ?
+			ORDER BY next_run_at
+			LIMIT ?
+		)
+		UPDATE automations
+		SET next_run_at = NULL,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id IN (SELECT id FROM due)
+		RETURNING id, name, action_type, schedule_kind, schedule_expr, timezone, payload_json,
+		          enabled, next_run_at, last_run_at, created_at, updated_at
+	`
+	rows, err := r.db.Query(query, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to claim due automations: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AutomationDefinition
+	for rows.Next() {
+		def, err := scanAutomationDefinition(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *def)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed reading claimed automations: %w", err)
+	}
+	return out, nil
+}
+
+// InsertAutomationRun inserts a running automation execution record.
+func (r *Repository) InsertAutomationRun(automationID int64, scheduledAt time.Time) (int64, error) {
+	query := `INSERT INTO automation_runs (automation_id, scheduled_at, status) VALUES (?, ?, 'running')`
+	res, err := r.db.Exec(query, automationID, scheduledAt)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert automation run: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to read automation run id: %w", err)
+	}
+	return id, nil
+}
+
+// CompleteAutomationRun finalizes an execution and updates definition schedule state.
+func (r *Repository) CompleteAutomationRun(runID int64, automationID int64, status, runErr, output string, finishedAt time.Time, enabled bool, lastRunAt time.Time, nextRunAt *time.Time) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin automation complete tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	runQuery := `
+		UPDATE automation_runs
+		SET status = ?, error = ?, output = ?, finished_at = ?
+		WHERE id = ?
+	`
+	if _, err := tx.Exec(runQuery, status, runErr, output, finishedAt, runID); err != nil {
+		return fmt.Errorf("failed to update automation run: %w", err)
+	}
+
+	defQuery := `
+		UPDATE automations
+		SET enabled = ?, last_run_at = ?, next_run_at = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`
+	var next interface{}
+	if nextRunAt != nil {
+		next = *nextRunAt
+	}
+	if _, err := tx.Exec(defQuery, boolToInt(enabled), lastRunAt, next, automationID); err != nil {
+		return fmt.Errorf("failed to update automation definition: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit automation completion: %w", err)
+	}
+	return nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+type automationRowScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func scanAutomationDefinition(scanner automationRowScanner) (*AutomationDefinition, error) {
+	var def AutomationDefinition
+	var enabled int
+	var nextRun sql.NullTime
+	var lastRun sql.NullTime
+	if err := scanner.Scan(
+		&def.ID,
+		&def.Name,
+		&def.ActionType,
+		&def.ScheduleKind,
+		&def.ScheduleExpr,
+		&def.Timezone,
+		&def.PayloadJSON,
+		&enabled,
+		&nextRun,
+		&lastRun,
+		&def.CreatedAt,
+		&def.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	def.Enabled = enabled == 1
+	if nextRun.Valid {
+		t := nextRun.Time
+		def.NextRunAt = &t
+	}
+	if lastRun.Valid {
+		t := lastRun.Time
+		def.LastRunAt = &t
+	}
+	return &def, nil
+}
+
 // --- Calendar sync ---
 
 // CalendarSyncRecord represents a row in the calendar_sync table.

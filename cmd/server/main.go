@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mklimuk/vault-pilot/pkg/ai"
 	"github.com/mklimuk/vault-pilot/pkg/api"
+	"github.com/mklimuk/vault-pilot/pkg/automation"
 	"github.com/mklimuk/vault-pilot/pkg/db"
 	"github.com/mklimuk/vault-pilot/pkg/integration/calendar"
 	"github.com/mklimuk/vault-pilot/pkg/integration/discord"
@@ -96,6 +99,7 @@ func main() {
 
 	// Google service account key — shared by Calendar, Drive, and Gmail
 	googleKeyFile := os.Getenv("GOOGLE_SERVICE_ACCOUNT_KEY")
+	var gmailSvc *gmail.Service
 
 	// Initialize Google Calendar Sync (Optional)
 	calendarID := os.Getenv("GOOGLE_CALENDAR_ID")
@@ -161,39 +165,104 @@ func main() {
 		if err != nil {
 			log.Printf("Failed to create Gmail HTTP client: %v", err)
 		} else {
-			gmailSvc, err := gmail.NewService(ctx, httpClient)
+			gmailSvc, err = gmail.NewService(ctx, httpClient)
 			if err != nil {
 				log.Printf("Failed to create Gmail service: %v", err)
 			} else {
-				poller := gmail.NewPoller(gmailSvc, 5*time.Minute, func(subject, body string) error {
-					log.Printf("Received email: %s", subject)
-
-					prompt := ai.AnalyzeInboxPrompt(fmt.Sprintf("Subject: %s\nBody: %s", subject, body))
-					analysisJSON, err := aiClient.GenerateText(context.Background(), prompt)
-					if err != nil {
-						return fmt.Errorf("AI analysis failed: %w", err)
-					}
-
-					// Use subject as title, analysis as content
-					title := subject
-					if title == "" {
-						title = "Email Item"
-					}
-					content := fmt.Sprintf("AI Analysis:\n%s\n\nOriginal:\n%s", analysisJSON, body)
-
-					if err := vault.CreateInboxItem(*vaultPath, tmplEngine, title, content); err != nil {
-						return fmt.Errorf("create inbox item: %w", err)
-					}
-
-					go gitManager.Sync("Add email item: " + title)
-					return nil
-				})
-				go poller.Start()
-				defer poller.Stop()
-				log.Println("Gmail poller started")
+				log.Println("Gmail service initialized for automation actions")
 			}
 		}
 	}
+
+	automationService := automation.NewService(repo, 15*time.Second, 10)
+	automationService.RegisterAction("pull_gmail", func(ctx context.Context, def db.AutomationDefinition) (string, error) {
+		if gmailSvc == nil {
+			return "", fmt.Errorf("gmail service is not configured")
+		}
+		msgs, err := gmailSvc.FetchUnreadEmails(ctx)
+		if err != nil {
+			return "", fmt.Errorf("fetch unread emails: %w", err)
+		}
+		created := 0
+		for _, msg := range msgs {
+			subject := ""
+			for _, h := range msg.Payload.Headers {
+				if h.Name == "Subject" {
+					subject = h.Value
+					break
+				}
+			}
+			if subject == "" {
+				subject = "Email Item"
+			}
+			body := gmail.GetBody(msg)
+			prompt := ai.AnalyzeInboxPrompt(fmt.Sprintf("Subject: %s\nBody: %s", subject, body))
+			analysisJSON, err := aiClient.GenerateText(ctx, prompt)
+			if err != nil {
+				log.Printf("pull_gmail: AI analysis failed for subject=%q: %v", subject, err)
+				continue
+			}
+			content := fmt.Sprintf("AI Analysis:\n%s\n\nOriginal:\n%s", analysisJSON, body)
+			if err := vault.CreateInboxItem(*vaultPath, tmplEngine, subject, content); err != nil {
+				log.Printf("pull_gmail: failed to create inbox item for subject=%q: %v", subject, err)
+				continue
+			}
+			created++
+		}
+		if created > 0 && gitManager != nil {
+			go gitManager.Sync(fmt.Sprintf("Automation: import %d email(s)", created))
+		}
+		return fmt.Sprintf("created %d inbox item(s)", created), nil
+	})
+	automationService.RegisterAction("generate_daily_summary", func(ctx context.Context, def db.AutomationDefinition) (string, error) {
+		var payload struct {
+			Folder string `json:"folder"`
+			Title  string `json:"title"`
+		}
+		if strings.TrimSpace(def.PayloadJSON) != "" {
+			if err := json.Unmarshal([]byte(def.PayloadJSON), &payload); err != nil {
+				return "", fmt.Errorf("invalid payload_json: %w", err)
+			}
+		}
+		targetFolder := payload.Folder
+		if targetFolder == "" {
+			targetFolder = "7. Daily Summaries"
+		}
+		title := payload.Title
+		if title == "" {
+			title = "Daily Vault Summary"
+		}
+
+		now := time.Now()
+		prompt := fmt.Sprintf(
+			"Generate a concise daily vault summary for %s with sections: Wins, Open Loops, Risks, and Top 3 Priorities.",
+			now.Format("2006-01-02"),
+		)
+		summary, err := aiClient.GenerateText(ctx, prompt)
+		if err != nil {
+			return "", fmt.Errorf("generate summary: %w", err)
+		}
+
+		fileName := fmt.Sprintf("%s %s.md", now.Format("2006-01-02"), vault.SanitizeFilename(title))
+		path := filepath.Join(*vaultPath, targetFolder, fileName)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return "", fmt.Errorf("create folder: %w", err)
+		}
+		content := fmt.Sprintf("# %s\n\nDate: %s\n\n%s\n", title, now.Format("2006-01-02"), summary)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return "", fmt.Errorf("write summary: %w", err)
+		}
+		if gitManager != nil {
+			go gitManager.Sync("Automation: add daily summary " + now.Format("2006-01-02"))
+		}
+		return "wrote " + fileName, nil
+	})
+	if err := ensureDefaultAutomations(repo, gmailSvc != nil, os.Getenv("AUTOMATION_TIMEZONE")); err != nil {
+		log.Printf("Failed to seed default automations: %v", err)
+	}
+	automationService.Start()
+	defer automationService.Stop()
+	log.Println("Automation scheduler started")
 
 	// Initialize Discord Bot (Optional)
 	discordToken := os.Getenv("DISCORD_TOKEN")
@@ -231,4 +300,62 @@ func main() {
 	if err := http.ListenAndServe(":"+*port, router); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
+}
+
+func ensureDefaultAutomations(repo *db.Repository, hasGmail bool, tz string) error {
+	if tz == "" {
+		tz = "UTC"
+	}
+	existing, err := repo.ListAutomations()
+	if err != nil {
+		return err
+	}
+	hasAction := map[string]bool{}
+	for _, def := range existing {
+		hasAction[def.ActionType] = true
+	}
+
+	if hasGmail && !hasAction["pull_gmail"] {
+		nextRun, err := automation.NextRun("interval", "5m", tz, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		_, err = repo.CreateAutomation(&db.AutomationDefinition{
+			Name:         "Pull Gmail Inbox",
+			ActionType:   "pull_gmail",
+			ScheduleKind: "interval",
+			ScheduleExpr: "5m",
+			Timezone:     tz,
+			PayloadJSON:  `{}`,
+			Enabled:      true,
+			NextRunAt:    nextRun,
+		})
+		if err != nil {
+			return err
+		}
+		log.Println("Seeded default automation: pull_gmail")
+	}
+
+	if !hasAction["generate_daily_summary"] {
+		nextRun, err := automation.NextRun("cron", "0 8 * * *", tz, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		_, err = repo.CreateAutomation(&db.AutomationDefinition{
+			Name:         "Daily Vault Summary",
+			ActionType:   "generate_daily_summary",
+			ScheduleKind: "cron",
+			ScheduleExpr: "0 8 * * *",
+			Timezone:     tz,
+			PayloadJSON:  `{"folder":"7. Daily Summaries","title":"Daily Vault Summary"}`,
+			Enabled:      true,
+			NextRunAt:    nextRun,
+		})
+		if err != nil {
+			return err
+		}
+		log.Println("Seeded default automation: generate_daily_summary")
+	}
+
+	return nil
 }

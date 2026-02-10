@@ -89,6 +89,34 @@ func (d *DB) InitSchema() error {
 		processed_at DATETIME NOT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+
+	CREATE TABLE IF NOT EXISTS automations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		action_type TEXT NOT NULL,
+		schedule_kind TEXT NOT NULL,
+		schedule_expr TEXT NOT NULL,
+		timezone TEXT NOT NULL DEFAULT 'UTC',
+		payload_json TEXT NOT NULL DEFAULT '{}',
+		enabled INTEGER NOT NULL DEFAULT 1,
+		next_run_at DATETIME,
+		last_run_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS automation_runs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		automation_id INTEGER NOT NULL,
+		scheduled_at DATETIME NOT NULL,
+		started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		finished_at DATETIME,
+		status TEXT NOT NULL,
+		error TEXT,
+		output TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (automation_id) REFERENCES automations(id) ON DELETE CASCADE
+	);
 	`
 
 	_, err := d.Exec(schema)
