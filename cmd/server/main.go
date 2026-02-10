@@ -26,6 +26,7 @@ import (
 	"github.com/mklimuk/vault-pilot/pkg/integration/telegram"
 	"github.com/mklimuk/vault-pilot/pkg/sync"
 	"github.com/mklimuk/vault-pilot/pkg/vault"
+	"github.com/mklimuk/vault-pilot/web"
 )
 
 // Config holds all configuration for the application
@@ -68,13 +69,13 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	// Config file flag
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $XDG_CONFIG_HOME/life-pilot/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default $XDG_CONFIG_HOME/life-pilot/config.yaml, $XDG_CONFIG_HOME=$HOME/.config if unset)")
 
-	// Application flags
-	rootCmd.Flags().StringP("vault", "v", "", "Path to Obsidian Vault (required)")
-	rootCmd.Flags().StringP("db", "d", "vault-pilot.db", "Path to SQLite DB")
+	// Application flags (vault and db default to $XDG_DATA_HOME/life-pilot/...)
+	rootCmd.Flags().StringP("vault", "v", "", "Path to Obsidian Vault (default $XDG_DATA_HOME/life-pilot/vault, $XDG_DATA_HOME=$HOME/.local/share if unset)")
+	rootCmd.Flags().StringP("db", "d", "", "Path to SQLite DB (default $XDG_DATA_HOME/life-pilot/pilot.db, $XDG_DATA_HOME=$HOME/.local/share if unset)")
 	rootCmd.Flags().StringP("port", "p", "8080", "HTTP Port")
-	rootCmd.Flags().String("ai-provider", "gemini", "AI provider: gemini, moonshot, openai, or anthropic")
+	rootCmd.Flags().String("ai-provider", "", "AI provider: gemini, moonshot, openai, or anthropic (default: none, configure in Settings)")
 
 	// Google integration flags
 	rootCmd.Flags().String("google-service-account-key", "", "Path to Google service account JSON key file")
@@ -141,11 +142,28 @@ func initConfig() error {
 		AutomationTimezone:        viper.GetString("automation.timezone"),
 	}
 
+	// Apply defaults for vault and db (XDG_DATA_HOME/life-pilot/...)
+	dataDir := getDataDir()
 	if config.VaultPath == "" {
-		return fmt.Errorf("vault path is required (use --vault flag or set VAULT_PILOT_VAULT environment variable)")
+		config.VaultPath = filepath.Join(dataDir, "life-pilot", "vault")
+	}
+	if config.DBPath == "" {
+		config.DBPath = filepath.Join(dataDir, "life-pilot", "pilot.db")
 	}
 
 	return nil
+}
+
+// getDataDir returns XDG_DATA_HOME or $HOME/.local/share.
+func getDataDir() string {
+	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+	return filepath.Join(home, ".local", "share")
 }
 
 func runServer() error {
@@ -163,41 +181,42 @@ func runServer() error {
 
 	repo := db.NewRepository(database)
 
-	// Initialize AI Client
-	var aiClient ai.Generator
-	switch config.AIProvider {
-	case "moonshot":
-		key := os.Getenv("MOONSHOT_API_KEY")
-		if key == "" {
-			return fmt.Errorf("MOONSHOT_API_KEY environment variable is required when using moonshot provider")
+	// Ensure vault and db parent directories exist
+	if err := os.MkdirAll(filepath.Dir(config.DBPath), 0755); err != nil {
+		return fmt.Errorf("failed to create db directory: %w", err)
+	}
+	if err := os.MkdirAll(config.VaultPath, 0755); err != nil {
+		return fmt.Errorf("failed to create vault directory: %w", err)
+	}
+
+	// Initialize AI Client (optional; user configures in Settings)
+	var aiClient ai.Generator = &ai.NoopGenerator{}
+	if config.AIProvider != "" {
+		switch config.AIProvider {
+		case "moonshot":
+			if key := os.Getenv("MOONSHOT_API_KEY"); key != "" {
+				aiClient = ai.NewMoonshotClient(key)
+			}
+		case "openai":
+			if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+				aiClient = ai.NewOpenAIClient(key)
+			}
+		case "anthropic":
+			if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+				aiClient = ai.NewAnthropicClient(key)
+			}
+		case "gemini":
+			if key := os.Getenv("GEMINI_API_KEY"); key != "" {
+				ctx := context.Background()
+				geminiClient, err := ai.NewClient(ctx, key)
+				if err != nil {
+					log.Printf("Failed to create Gemini client: %v", err)
+				} else {
+					defer geminiClient.Close()
+					aiClient = geminiClient
+				}
+			}
 		}
-		aiClient = ai.NewMoonshotClient(key)
-	case "openai":
-		key := os.Getenv("OPENAI_API_KEY")
-		if key == "" {
-			return fmt.Errorf("OPENAI_API_KEY environment variable is required when using openai provider")
-		}
-		aiClient = ai.NewOpenAIClient(key)
-	case "anthropic":
-		key := os.Getenv("ANTHROPIC_API_KEY")
-		if key == "" {
-			return fmt.Errorf("ANTHROPIC_API_KEY environment variable is required when using anthropic provider")
-		}
-		aiClient = ai.NewAnthropicClient(key)
-	case "gemini":
-		key := os.Getenv("GEMINI_API_KEY")
-		if key == "" {
-			return fmt.Errorf("GEMINI_API_KEY environment variable is required when using gemini provider")
-		}
-		ctx := context.Background()
-		geminiClient, err := ai.NewClient(ctx, key)
-		if err != nil {
-			return fmt.Errorf("failed to create AI client: %w", err)
-		}
-		defer geminiClient.Close()
-		aiClient = geminiClient
-	default:
-		return fmt.Errorf("unknown AI provider: %s", config.AIProvider)
 	}
 
 	// Initialize Template Engine
@@ -207,8 +226,28 @@ func runServer() error {
 	// Initialize Git Manager
 	gitManager := sync.NewGitManager(config.VaultPath)
 
-	// Initialize Router
-	router := api.NewRouter(repo, aiClient, tmplEngine, config.VaultPath, gitManager)
+	// Initialize API Router
+	apiRouter := api.NewRouter(repo, aiClient, tmplEngine, config.VaultPath, gitManager)
+
+	// Initialize frontend handler (embedded assets)
+	webHandler, err := web.NewHandler(web.Assets)
+	if err != nil {
+		return fmt.Errorf("frontend assets not found: run 'cd web && bun run build' first: %w", err)
+	}
+
+	// Main handler: /api/* -> API, /app -> frontend, / -> redirect to /app
+	mux := http.NewServeMux()
+	mux.Handle("/api/", http.StripPrefix("/api", apiRouter))
+	mux.Handle("/app", webHandler)
+	mux.Handle("/app/", webHandler)
+	rootHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/app/", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	mux.Handle("/", rootHandler)
 
 	var gmailSvc *gmail.Service
 
@@ -407,7 +446,7 @@ func runServer() error {
 	}
 
 	log.Printf("Starting server on :%s", config.Port)
-	if err := http.ListenAndServe(":"+config.Port, router); err != nil {
+	if err := http.ListenAndServe(":"+config.Port, mux); err != nil {
 		return fmt.Errorf("server failed: %w", err)
 	}
 

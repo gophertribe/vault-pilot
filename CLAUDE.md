@@ -9,7 +9,16 @@ Vault Pilot is a Go backend for managing a GTD (Getting Things Done) Obsidian va
 ## Build & Test Commands
 
 ```bash
-# Build (requires CGO for sqlite3)
+# Full build (frontend + Go binary); run from repo root
+make build
+
+# Frontend only (dev server)
+make web-dev
+
+# Frontend only (production build)
+make web-build
+
+# Go binary only (requires web/dist to exist from make web-build)
 go build -o vault-pilot ./cmd/server
 
 # Run all tests
@@ -60,6 +69,7 @@ The app follows a layered architecture where the HTTP API layer orchestrates bet
 - **`pkg/ai`** - AI text generation behind the `Generator` interface (`GenerateText(ctx, prompt) (string, error)`). Implementations: `Client` (Google Gemini via `google/generative-ai-go`), `MoonshotClient` (Moonshot/Kimi 2.5 via OpenAI-compatible HTTP API), `OpenAIClient` (OpenAI chat completions API), and `AnthropicClient` (Anthropic messages API). Provider is selected with `-ai-provider` flag. Prompt templates live in `prompts.go`.
 - **`pkg/vault`** - File-level operations on the Obsidian vault. `ReadNote` parses YAML frontmatter + markdown body into a `Note` struct. `WriteNote` serializes back. `TemplateEngine` loads `.md` templates from the vault's `0. GTD System/Templates/` directory and renders `{{title}}` and `{{date:FORMAT}}` placeholders (Moment.js format converted to Go time format).
 - **`pkg/db`** - SQLite via `mattn/go-sqlite3` (CGO required). Schema is initialized inline in `InitSchema()` (no migration tool yet). `Repository` provides data access methods.
+- **`web/`** - Frontend (Bun + Vite + React + TypeScript + shadcn/ui). Built to `web/dist/` and embedded in the Go binary. API routes under `/api/*`, SPA at `/app/*`.
 - **`pkg/sync`** - Git operations via `go-git`. `Sync()` stages all, commits, and pushes (SSH auth with fallback).
 - **`pkg/integration/google`** - Shared Google service account auth (`NewHTTPClient` for OAuth-style APIs, `ClientOption` for service constructors). Used by Calendar, Drive, and Gmail integrations.
 - **`pkg/integration/calendar`** - Bidirectional Google Calendar sync. `Service` wraps the Calendar API behind a `CalendarAPI` interface. `Syncer` runs a periodic loop that pulls events into `2. Next Actions/@calendar/` notes and pushes vault notes with `due_date` to Calendar.
@@ -96,3 +106,10 @@ All vault notes use YAML frontmatter. The `Note.Frontmatter` field is `interface
 - `GOOGLE_DRIVE_WATCH_FOLDER_ID` (optional, requires `GOOGLE_SERVICE_ACCOUNT_KEY`) - Drive folder ID to watch for incoming files
 - `DISCORD_TOKEN` (optional) - enables Discord bot
 - `TELEGRAM_TOKEN` (optional) - enables Telegram bot
+
+## API Routes (served at /api/*)
+
+- `POST /api/inbox` - Create inbox item
+- `GET /api/projects` - List active projects
+- `POST /api/review/weekly` - Generate weekly review
+- `GET /api/automations`, `POST /api/automations`, `PATCH /api/automations/{id}`, `POST /api/automations/{id}/run-now`

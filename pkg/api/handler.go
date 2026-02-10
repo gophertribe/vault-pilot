@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -41,6 +42,10 @@ func (h *Handler) HandleCreateInboxItem(w http.ResponseWriter, r *http.Request) 
 	prompt := ai.AnalyzeInboxPrompt(req.Content)
 	analysisJSON, err := h.AI.GenerateText(r.Context(), prompt)
 	if err != nil {
+		if errors.Is(err, ai.ErrNotConfigured) {
+			http.Error(w, "AI provider not configured; configure in Settings", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, fmt.Sprintf("AI analysis failed: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -152,6 +157,10 @@ func (h *Handler) HandleGenerateWeeklyReview(w http.ResponseWriter, r *http.Requ
 	prompt := ai.GenerateReviewPrompt(activeProjects, inboxCount)
 	aiResponse, err := h.AI.GenerateText(r.Context(), prompt)
 	if err != nil {
+		if errors.Is(err, ai.ErrNotConfigured) {
+			http.Error(w, "AI provider not configured; configure in Settings", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, fmt.Sprintf("AI generation failed: %v", err), http.StatusInternalServerError)
 		return
 	}
