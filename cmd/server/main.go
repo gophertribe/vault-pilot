@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/mklimuk/vault-pilot/pkg/ai"
 	"github.com/mklimuk/vault-pilot/pkg/api"
@@ -26,90 +28,198 @@ import (
 	"github.com/mklimuk/vault-pilot/pkg/vault"
 )
 
-func main() {
-	vaultPath := flag.String("vault", "", "Path to Obsidian Vault")
-	dbPath := flag.String("db", "vault-pilot.db", "Path to SQLite DB")
-	port := flag.String("port", "8080", "HTTP Port")
-	aiProvider := flag.String("ai-provider", "gemini", "AI provider: gemini, moonshot, openai, or anthropic")
-	flag.Parse()
+// Config holds all configuration for the application
+type Config struct {
+	VaultPath              string
+	DBPath                 string
+	Port                   string
+	AIProvider             string
+	GoogleServiceAccountKey string
+	GoogleCalendarID       string
+	GoogleDriveBackupFolderID string
+	GoogleDriveWatchFolderID  string
+	DiscordToken           string
+	TelegramToken          string
+	AutomationTimezone     string
+}
 
-	if *vaultPath == "" {
-		log.Fatal("Please provide -vault path")
+var (
+	cfgFile string
+	config  Config
+)
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+var rootCmd = &cobra.Command{
+	Use:   "vault-pilot",
+	Short: "GTD Obsidian vault management backend",
+	Long:  `Vault Pilot is a Go backend for managing a GTD (Getting Things Done) Obsidian vault.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return initConfig()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runServer()
+	},
+}
+
+func init() {
+	// Config file flag
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $XDG_CONFIG_HOME/life-pilot/config.yaml)")
+
+	// Application flags
+	rootCmd.Flags().StringP("vault", "v", "", "Path to Obsidian Vault (required)")
+	rootCmd.Flags().StringP("db", "d", "vault-pilot.db", "Path to SQLite DB")
+	rootCmd.Flags().StringP("port", "p", "8080", "HTTP Port")
+	rootCmd.Flags().String("ai-provider", "gemini", "AI provider: gemini, moonshot, openai, or anthropic")
+
+	// Google integration flags
+	rootCmd.Flags().String("google-service-account-key", "", "Path to Google service account JSON key file")
+	rootCmd.Flags().String("google-calendar-id", "", "Google Calendar ID for bidirectional sync")
+	rootCmd.Flags().String("google-drive-backup-folder-id", "", "Google Drive folder ID for vault backup")
+	rootCmd.Flags().String("google-drive-watch-folder-id", "", "Google Drive folder ID to watch for incoming files")
+
+	// Bot integration flags
+	rootCmd.Flags().String("discord-token", "", "Discord bot token")
+	rootCmd.Flags().String("telegram-token", "", "Telegram bot token")
+
+	// Automation flags
+	rootCmd.Flags().String("automation-timezone", "UTC", "Timezone for automation schedules")
+
+	// Bind flags to Viper
+	viper.BindPFlag("vault", rootCmd.Flags().Lookup("vault"))
+	viper.BindPFlag("db", rootCmd.Flags().Lookup("db"))
+	viper.BindPFlag("port", rootCmd.Flags().Lookup("port"))
+	viper.BindPFlag("ai-provider", rootCmd.Flags().Lookup("ai-provider"))
+	viper.BindPFlag("google.service_account_key", rootCmd.Flags().Lookup("google-service-account-key"))
+	viper.BindPFlag("google.calendar_id", rootCmd.Flags().Lookup("google-calendar-id"))
+	viper.BindPFlag("google.drive_backup_folder_id", rootCmd.Flags().Lookup("google-drive-backup-folder-id"))
+	viper.BindPFlag("google.drive_watch_folder_id", rootCmd.Flags().Lookup("google-drive-watch-folder-id"))
+	viper.BindPFlag("discord.token", rootCmd.Flags().Lookup("discord-token"))
+	viper.BindPFlag("telegram.token", rootCmd.Flags().Lookup("telegram-token"))
+	viper.BindPFlag("automation.timezone", rootCmd.Flags().Lookup("automation-timezone"))
+
+	// Set environment variable prefix (e.g. VAULT_PILOT_VAULT, VAULT_PILOT_PORT)
+	viper.SetEnvPrefix("VAULT_PILOT")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	viper.AutomaticEnv()
+}
+
+func initConfig() error {
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+	} else {
+		configDir := os.Getenv("XDG_CONFIG_HOME")
+		if configDir == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			configDir = filepath.Join(home, ".config")
+		}
+		viper.SetConfigFile(filepath.Join(configDir, "life-pilot", "config.yaml"))
 	}
 
+	// Read config file if it exists (ignore errors if file doesn't exist)
+	viper.ReadInConfig()
+
+	// Load configuration into struct
+	config = Config{
+		VaultPath:                 viper.GetString("vault"),
+		DBPath:                    viper.GetString("db"),
+		Port:                      viper.GetString("port"),
+		AIProvider:                viper.GetString("ai-provider"),
+		GoogleServiceAccountKey:   viper.GetString("google.service_account_key"),
+		GoogleCalendarID:          viper.GetString("google.calendar_id"),
+		GoogleDriveBackupFolderID: viper.GetString("google.drive_backup_folder_id"),
+		GoogleDriveWatchFolderID:  viper.GetString("google.drive_watch_folder_id"),
+		DiscordToken:              viper.GetString("discord.token"),
+		TelegramToken:             viper.GetString("telegram.token"),
+		AutomationTimezone:        viper.GetString("automation.timezone"),
+	}
+
+	if config.VaultPath == "" {
+		return fmt.Errorf("vault path is required (use --vault flag or set VAULT_PILOT_VAULT environment variable)")
+	}
+
+	return nil
+}
+
+func runServer() error {
+
 	// Initialize DB
-	database, err := db.NewDB(*dbPath)
+	database, err := db.NewDB(config.DBPath)
 	if err != nil {
-		log.Fatalf("Failed to connect to DB: %v", err)
+		return fmt.Errorf("failed to connect to DB: %w", err)
 	}
 	defer database.Close()
 
 	if err := database.InitSchema(); err != nil {
-		log.Fatalf("Failed to init schema: %v", err)
+		return fmt.Errorf("failed to init schema: %w", err)
 	}
 
 	repo := db.NewRepository(database)
 
 	// Initialize AI Client
 	var aiClient ai.Generator
-	switch *aiProvider {
+	switch config.AIProvider {
 	case "moonshot":
 		key := os.Getenv("MOONSHOT_API_KEY")
 		if key == "" {
-			log.Fatal("MOONSHOT_API_KEY environment variable is required when using moonshot provider")
+			return fmt.Errorf("MOONSHOT_API_KEY environment variable is required when using moonshot provider")
 		}
 		aiClient = ai.NewMoonshotClient(key)
 	case "openai":
 		key := os.Getenv("OPENAI_API_KEY")
 		if key == "" {
-			log.Fatal("OPENAI_API_KEY environment variable is required when using openai provider")
+			return fmt.Errorf("OPENAI_API_KEY environment variable is required when using openai provider")
 		}
 		aiClient = ai.NewOpenAIClient(key)
 	case "anthropic":
 		key := os.Getenv("ANTHROPIC_API_KEY")
 		if key == "" {
-			log.Fatal("ANTHROPIC_API_KEY environment variable is required when using anthropic provider")
+			return fmt.Errorf("ANTHROPIC_API_KEY environment variable is required when using anthropic provider")
 		}
 		aiClient = ai.NewAnthropicClient(key)
 	case "gemini":
 		key := os.Getenv("GEMINI_API_KEY")
 		if key == "" {
-			log.Fatal("GEMINI_API_KEY environment variable is required when using gemini provider")
+			return fmt.Errorf("GEMINI_API_KEY environment variable is required when using gemini provider")
 		}
 		ctx := context.Background()
 		geminiClient, err := ai.NewClient(ctx, key)
 		if err != nil {
-			log.Fatalf("Failed to create AI client: %v", err)
+			return fmt.Errorf("failed to create AI client: %w", err)
 		}
 		defer geminiClient.Close()
 		aiClient = geminiClient
 	default:
-		log.Fatalf("Unknown AI provider: %s", *aiProvider)
+		return fmt.Errorf("unknown AI provider: %s", config.AIProvider)
 	}
 
 	// Initialize Template Engine
-	templateDir := filepath.Join(*vaultPath, "0. GTD System", "Templates")
+	templateDir := filepath.Join(config.VaultPath, "0. GTD System", "Templates")
 	tmplEngine := vault.NewTemplateEngine(templateDir)
 
 	// Initialize Git Manager
-	gitManager := sync.NewGitManager(*vaultPath)
+	gitManager := sync.NewGitManager(config.VaultPath)
 
 	// Initialize Router
-	router := api.NewRouter(repo, aiClient, tmplEngine, *vaultPath, gitManager)
+	router := api.NewRouter(repo, aiClient, tmplEngine, config.VaultPath, gitManager)
 
-	// Google service account key — shared by Calendar, Drive, and Gmail
-	googleKeyFile := os.Getenv("GOOGLE_SERVICE_ACCOUNT_KEY")
 	var gmailSvc *gmail.Service
 
 	// Initialize Google Calendar Sync (Optional)
-	calendarID := os.Getenv("GOOGLE_CALENDAR_ID")
-	if googleKeyFile != "" && calendarID != "" {
+	if config.GoogleServiceAccountKey != "" && config.GoogleCalendarID != "" {
 		ctx := context.Background()
-		calSvc, err := calendar.NewService(ctx, googleKeyFile, calendarID)
+		calSvc, err := calendar.NewService(ctx, config.GoogleServiceAccountKey, config.GoogleCalendarID)
 		if err != nil {
 			log.Printf("Failed to create Calendar service: %v", err)
 		} else {
-			calSyncer := calendar.NewSyncer(calSvc, repo, *vaultPath, tmplEngine, gitManager,
+			calSyncer := calendar.NewSyncer(calSvc, repo, config.VaultPath, tmplEngine, gitManager,
 				15*time.Minute, 14*24*time.Hour)
 			if err := calSyncer.Start(); err != nil {
 				log.Printf("Failed to start Calendar syncer: %v", err)
@@ -121,14 +231,13 @@ func main() {
 	}
 
 	// Initialize Google Drive Backup (Optional)
-	driveBackupFolderID := os.Getenv("GOOGLE_DRIVE_BACKUP_FOLDER_ID")
-	if googleKeyFile != "" && driveBackupFolderID != "" {
+	if config.GoogleServiceAccountKey != "" && config.GoogleDriveBackupFolderID != "" {
 		ctx := context.Background()
-		drvSvc, err := drive.NewService(ctx, googleKeyFile, driveBackupFolderID)
+		drvSvc, err := drive.NewService(ctx, config.GoogleServiceAccountKey, config.GoogleDriveBackupFolderID)
 		if err != nil {
 			log.Printf("Failed to create Drive backup service: %v", err)
 		} else {
-			backup := drive.NewBackup(drvSvc, repo, *vaultPath, 30*time.Minute)
+			backup := drive.NewBackup(drvSvc, repo, config.VaultPath, 30*time.Minute)
 			if err := backup.Start(); err != nil {
 				log.Printf("Failed to start Drive backup: %v", err)
 			} else {
@@ -139,14 +248,13 @@ func main() {
 	}
 
 	// Initialize Google Drive Watcher (Optional)
-	driveWatchFolderID := os.Getenv("GOOGLE_DRIVE_WATCH_FOLDER_ID")
-	if googleKeyFile != "" && driveWatchFolderID != "" {
+	if config.GoogleServiceAccountKey != "" && config.GoogleDriveWatchFolderID != "" {
 		ctx := context.Background()
-		drvSvc, err := drive.NewService(ctx, googleKeyFile, driveWatchFolderID)
+		drvSvc, err := drive.NewService(ctx, config.GoogleServiceAccountKey, config.GoogleDriveWatchFolderID)
 		if err != nil {
 			log.Printf("Failed to create Drive watch service: %v", err)
 		} else {
-			watcher := drive.NewWatcher(drvSvc, repo, *vaultPath, tmplEngine, gitManager, 5*time.Minute)
+			watcher := drive.NewWatcher(drvSvc, repo, config.VaultPath, tmplEngine, gitManager, 5*time.Minute)
 			if err := watcher.Start(); err != nil {
 				log.Printf("Failed to start Drive watcher: %v", err)
 			} else {
@@ -157,9 +265,9 @@ func main() {
 	}
 
 	// Initialize Gmail Integration (Optional)
-	if googleKeyFile != "" {
+	if config.GoogleServiceAccountKey != "" {
 		ctx := context.Background()
-		httpClient, err := googleauth.NewHTTPClient(ctx, googleKeyFile,
+		httpClient, err := googleauth.NewHTTPClient(ctx, config.GoogleServiceAccountKey,
 			"https://www.googleapis.com/auth/gmail.readonly",
 			"https://www.googleapis.com/auth/gmail.modify")
 		if err != nil {
@@ -203,7 +311,7 @@ func main() {
 				continue
 			}
 			content := fmt.Sprintf("AI Analysis:\n%s\n\nOriginal:\n%s", analysisJSON, body)
-			if err := vault.CreateInboxItem(*vaultPath, tmplEngine, subject, content); err != nil {
+			if err := vault.CreateInboxItem(config.VaultPath, tmplEngine, subject, content); err != nil {
 				log.Printf("pull_gmail: failed to create inbox item for subject=%q: %v", subject, err)
 				continue
 			}
@@ -244,7 +352,7 @@ func main() {
 		}
 
 		fileName := fmt.Sprintf("%s %s.md", now.Format("2006-01-02"), vault.SanitizeFilename(title))
-		path := filepath.Join(*vaultPath, targetFolder, fileName)
+		path := filepath.Join(config.VaultPath, targetFolder, fileName)
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return "", fmt.Errorf("create folder: %w", err)
 		}
@@ -257,7 +365,11 @@ func main() {
 		}
 		return "wrote " + fileName, nil
 	})
-	if err := ensureDefaultAutomations(repo, gmailSvc != nil, os.Getenv("AUTOMATION_TIMEZONE")); err != nil {
+	timezone := config.AutomationTimezone
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	if err := ensureDefaultAutomations(repo, gmailSvc != nil, timezone); err != nil {
 		log.Printf("Failed to seed default automations: %v", err)
 	}
 	automationService.Start()
@@ -265,9 +377,8 @@ func main() {
 	log.Println("Automation scheduler started")
 
 	// Initialize Discord Bot (Optional)
-	discordToken := os.Getenv("DISCORD_TOKEN")
-	if discordToken != "" {
-		bot, err := discord.NewBot(discordToken, *vaultPath, tmplEngine, gitManager)
+	if config.DiscordToken != "" {
+		bot, err := discord.NewBot(config.DiscordToken, config.VaultPath, tmplEngine, gitManager)
 		if err != nil {
 			log.Printf("Failed to create Discord bot: %v", err)
 		} else {
@@ -281,9 +392,8 @@ func main() {
 	}
 
 	// Initialize Telegram Bot (Optional)
-	telegramToken := os.Getenv("TELEGRAM_TOKEN")
-	if telegramToken != "" {
-		tgBot, err := telegram.NewBot(telegramToken, *vaultPath, tmplEngine, gitManager)
+	if config.TelegramToken != "" {
+		tgBot, err := telegram.NewBot(config.TelegramToken, config.VaultPath, tmplEngine, gitManager)
 		if err != nil {
 			log.Printf("Failed to create Telegram bot: %v", err)
 		} else {
@@ -296,10 +406,12 @@ func main() {
 		}
 	}
 
-	log.Printf("Starting server on :%s", *port)
-	if err := http.ListenAndServe(":"+*port, router); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	log.Printf("Starting server on :%s", config.Port)
+	if err := http.ListenAndServe(":"+config.Port, router); err != nil {
+		return fmt.Errorf("server failed: %w", err)
 	}
+
+	return nil
 }
 
 func ensureDefaultAutomations(repo *db.Repository, hasGmail bool, tz string) error {
