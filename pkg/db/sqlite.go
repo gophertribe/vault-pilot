@@ -117,6 +117,17 @@ func (d *DB) InitSchema() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (automation_id) REFERENCES automations(id) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS app_settings (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		ai_provider TEXT NOT NULL DEFAULT '',
+		openai_api_key TEXT NOT NULL DEFAULT '',
+		anthropic_api_key TEXT NOT NULL DEFAULT '',
+		telegram_token TEXT NOT NULL DEFAULT '',
+		discord_token TEXT NOT NULL DEFAULT '',
+		automation_timezone TEXT NOT NULL DEFAULT 'UTC',
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 
 	_, err := d.Exec(schema)

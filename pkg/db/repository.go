@@ -24,6 +24,17 @@ type ReviewLog struct {
 	Status    string
 }
 
+// AppSettings stores persisted app configuration entered from Settings UI.
+type AppSettings struct {
+	AIProvider         string
+	OpenAIAPIKey       string
+	AnthropicAPIKey    string
+	TelegramToken      string
+	DiscordToken       string
+	AutomationTimezone string
+	UpdatedAt          time.Time
+}
+
 // LogReview creates a new review log entry
 func (r *Repository) LogReview(weekOf string) error {
 	query := `INSERT INTO reviews (week_of, status) VALUES (?, 'draft')`
@@ -48,6 +59,66 @@ func (r *Repository) GetLatestReview() (*ReviewLog, error) {
 		return nil, fmt.Errorf("failed to get latest review: %w", err)
 	}
 	return &log, nil
+}
+
+// GetAppSettings returns the single persisted app settings row.
+func (r *Repository) GetAppSettings() (*AppSettings, error) {
+	query := `
+		SELECT ai_provider, openai_api_key, anthropic_api_key, telegram_token, discord_token, automation_timezone, updated_at
+		FROM app_settings
+		WHERE id = 1
+	`
+	row := r.db.QueryRow(query)
+
+	var settings AppSettings
+	err := row.Scan(
+		&settings.AIProvider,
+		&settings.OpenAIAPIKey,
+		&settings.AnthropicAPIKey,
+		&settings.TelegramToken,
+		&settings.DiscordToken,
+		&settings.AutomationTimezone,
+		&settings.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get app settings: %w", err)
+	}
+	return &settings, nil
+}
+
+// UpsertAppSettings inserts or updates app settings.
+func (r *Repository) UpsertAppSettings(settings *AppSettings) error {
+	query := `
+		INSERT INTO app_settings
+			(id, ai_provider, openai_api_key, anthropic_api_key, telegram_token, discord_token, automation_timezone, updated_at)
+		VALUES
+			(1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(id) DO UPDATE SET
+			ai_provider = excluded.ai_provider,
+			openai_api_key = excluded.openai_api_key,
+			anthropic_api_key = excluded.anthropic_api_key,
+			telegram_token = excluded.telegram_token,
+			discord_token = excluded.discord_token,
+			automation_timezone = excluded.automation_timezone,
+			updated_at = CURRENT_TIMESTAMP
+	`
+
+	_, err := r.db.Exec(
+		query,
+		settings.AIProvider,
+		settings.OpenAIAPIKey,
+		settings.AnthropicAPIKey,
+		settings.TelegramToken,
+		settings.DiscordToken,
+		settings.AutomationTimezone,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upsert app settings: %w", err)
+	}
+	return nil
 }
 
 // AutomationDefinition represents a scheduled automation configuration.

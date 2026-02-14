@@ -171,3 +171,76 @@ func TestReviewLog(t *testing.T) {
 		t.Errorf("expected week 2026-W05, got %+v", rev)
 	}
 }
+
+func TestAppSettings(t *testing.T) {
+	repo := setupTestDB(t)
+
+	got, err := repo.GetAppSettings()
+	if err != nil {
+		t.Fatalf("get empty settings: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil settings, got %+v", got)
+	}
+
+	initial := &AppSettings{
+		AIProvider:         "openai",
+		OpenAIAPIKey:       "sk-openai",
+		AnthropicAPIKey:    "",
+		TelegramToken:      "tg-token",
+		DiscordToken:       "",
+		AutomationTimezone: "America/Los_Angeles",
+	}
+	if err := repo.UpsertAppSettings(initial); err != nil {
+		t.Fatalf("upsert initial settings: %v", err)
+	}
+
+	got, err = repo.GetAppSettings()
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected settings, got nil")
+	}
+	if got.AIProvider != "openai" {
+		t.Errorf("ai provider = %q", got.AIProvider)
+	}
+	if got.OpenAIAPIKey != "sk-openai" {
+		t.Errorf("openai key = %q", got.OpenAIAPIKey)
+	}
+	if got.TelegramToken != "tg-token" {
+		t.Errorf("telegram token = %q", got.TelegramToken)
+	}
+
+	updated := &AppSettings{
+		AIProvider:         "anthropic",
+		OpenAIAPIKey:       "",
+		AnthropicAPIKey:    "sk-ant",
+		TelegramToken:      "",
+		DiscordToken:       "discord-token",
+		AutomationTimezone: "UTC",
+	}
+	if err := repo.UpsertAppSettings(updated); err != nil {
+		t.Fatalf("upsert updated settings: %v", err)
+	}
+
+	got, err = repo.GetAppSettings()
+	if err != nil {
+		t.Fatalf("get updated settings: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected updated settings, got nil")
+	}
+	if got.AIProvider != "anthropic" {
+		t.Errorf("ai provider = %q", got.AIProvider)
+	}
+	if got.OpenAIAPIKey != "" {
+		t.Errorf("openai key = %q", got.OpenAIAPIKey)
+	}
+	if got.AnthropicAPIKey != "sk-ant" {
+		t.Errorf("anthropic key = %q", got.AnthropicAPIKey)
+	}
+	if got.DiscordToken != "discord-token" {
+		t.Errorf("discord token = %q", got.DiscordToken)
+	}
+}

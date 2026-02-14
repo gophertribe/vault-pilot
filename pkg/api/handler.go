@@ -25,6 +25,37 @@ type Handler struct {
 	Git        *sync.GitManager
 }
 
+func (h *Handler) aiForRequest() ai.Generator {
+	settings, err := h.Repo.GetAppSettings()
+	if err != nil || settings == nil {
+		return h.AI
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(settings.AIProvider))
+	switch provider {
+	case "openai":
+		key := strings.TrimSpace(settings.OpenAIAPIKey)
+		if key == "" {
+			key = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+		}
+		if key == "" {
+			return &ai.NoopGenerator{}
+		}
+		return ai.NewOpenAIClient(key)
+	case "anthropic":
+		key := strings.TrimSpace(settings.AnthropicAPIKey)
+		if key == "" {
+			key = strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+		}
+		if key == "" {
+			return &ai.NoopGenerator{}
+		}
+		return ai.NewAnthropicClient(key)
+	default:
+		return h.AI
+	}
+}
+
 // CreateInboxRequest represents the payload for creating an inbox item
 type CreateInboxRequest struct {
 	Content string `json:"content"`
@@ -40,7 +71,7 @@ func (h *Handler) HandleCreateInboxItem(w http.ResponseWriter, r *http.Request) 
 
 	// 1. Analyze content with AI
 	prompt := ai.AnalyzeInboxPrompt(req.Content)
-	analysisJSON, err := h.AI.GenerateText(r.Context(), prompt)
+	analysisJSON, err := h.aiForRequest().GenerateText(r.Context(), prompt)
 	if err != nil {
 		if errors.Is(err, ai.ErrNotConfigured) {
 			http.Error(w, "AI provider not configured; configure in Settings", http.StatusServiceUnavailable)
@@ -155,7 +186,7 @@ func (h *Handler) HandleGenerateWeeklyReview(w http.ResponseWriter, r *http.Requ
 
 	// 2. Generate Content with AI
 	prompt := ai.GenerateReviewPrompt(activeProjects, inboxCount)
-	aiResponse, err := h.AI.GenerateText(r.Context(), prompt)
+	aiResponse, err := h.aiForRequest().GenerateText(r.Context(), prompt)
 	if err != nil {
 		if errors.Is(err, ai.ErrNotConfigured) {
 			http.Error(w, "AI provider not configured; configure in Settings", http.StatusServiceUnavailable)

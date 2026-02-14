@@ -24,6 +24,8 @@ func NewRouter(repo *db.Repository, aiClient ai.Generator, tmplEngine *vault.Tem
 	mux.HandleFunc("POST /inbox", h.HandleCreateInboxItem)
 	mux.HandleFunc("GET /projects", h.HandleListProjects)
 	mux.HandleFunc("POST /review/weekly", h.HandleGenerateWeeklyReview)
+	mux.HandleFunc("GET /settings", h.HandleGetSettings)
+	mux.HandleFunc("PUT /settings", h.HandleUpdateSettings)
 	mux.HandleFunc("POST /automations", h.HandleCreateAutomation)
 	mux.HandleFunc("GET /automations", h.HandleListAutomations)
 	mux.HandleFunc("PATCH /automations/{id}", h.HandleUpdateAutomation)

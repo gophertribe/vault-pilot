@@ -31,17 +31,17 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	VaultPath              string
-	DBPath                 string
-	Port                   string
-	AIProvider             string
-	GoogleServiceAccountKey string
-	GoogleCalendarID       string
+	VaultPath                 string
+	DBPath                    string
+	Port                      string
+	AIProvider                string
+	GoogleServiceAccountKey   string
+	GoogleCalendarID          string
 	GoogleDriveBackupFolderID string
 	GoogleDriveWatchFolderID  string
-	DiscordToken           string
-	TelegramToken          string
-	AutomationTimezone     string
+	DiscordToken              string
+	TelegramToken             string
+	AutomationTimezone        string
 }
 
 var (
@@ -181,6 +181,12 @@ func runServer() error {
 
 	repo := db.NewRepository(database)
 
+	storedSettings, err := repo.GetAppSettings()
+	if err != nil {
+		log.Printf("Failed to load persisted app settings: %v", err)
+	}
+	applyStoredSettingsFallback(&config, storedSettings)
+
 	// Ensure vault and db parent directories exist
 	if err := os.MkdirAll(filepath.Dir(config.DBPath), 0755); err != nil {
 		return fmt.Errorf("failed to create db directory: %w", err)
@@ -191,6 +197,14 @@ func runServer() error {
 
 	// Initialize AI Client (optional; user configures in Settings)
 	var aiClient ai.Generator = &ai.NoopGenerator{}
+	openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if openAIKey == "" && storedSettings != nil {
+		openAIKey = strings.TrimSpace(storedSettings.OpenAIAPIKey)
+	}
+	anthropicKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+	if anthropicKey == "" && storedSettings != nil {
+		anthropicKey = strings.TrimSpace(storedSettings.AnthropicAPIKey)
+	}
 	if config.AIProvider != "" {
 		switch config.AIProvider {
 		case "moonshot":
@@ -198,12 +212,12 @@ func runServer() error {
 				aiClient = ai.NewMoonshotClient(key)
 			}
 		case "openai":
-			if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-				aiClient = ai.NewOpenAIClient(key)
+			if openAIKey != "" {
+				aiClient = ai.NewOpenAIClient(openAIKey)
 			}
 		case "anthropic":
-			if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-				aiClient = ai.NewAnthropicClient(key)
+			if anthropicKey != "" {
+				aiClient = ai.NewAnthropicClient(anthropicKey)
 			}
 		case "gemini":
 			if key := os.Getenv("GEMINI_API_KEY"); key != "" {
@@ -509,4 +523,25 @@ func ensureDefaultAutomations(repo *db.Repository, hasGmail bool, tz string) err
 	}
 
 	return nil
+}
+
+func applyStoredSettingsFallback(cfg *Config, settings *db.AppSettings) {
+	if settings == nil {
+		return
+	}
+
+	if strings.TrimSpace(cfg.AIProvider) == "" {
+		cfg.AIProvider = strings.TrimSpace(settings.AIProvider)
+	}
+	if strings.TrimSpace(cfg.TelegramToken) == "" {
+		cfg.TelegramToken = strings.TrimSpace(settings.TelegramToken)
+	}
+	if strings.TrimSpace(cfg.DiscordToken) == "" {
+		cfg.DiscordToken = strings.TrimSpace(settings.DiscordToken)
+	}
+	if strings.TrimSpace(cfg.AutomationTimezone) == "" || strings.EqualFold(strings.TrimSpace(cfg.AutomationTimezone), "UTC") {
+		if tz := strings.TrimSpace(settings.AutomationTimezone); tz != "" {
+			cfg.AutomationTimezone = tz
+		}
+	}
 }
