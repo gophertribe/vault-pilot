@@ -49,6 +49,9 @@ func (s *Service) FetchUnreadEmails(ctx context.Context) ([]*gmail.Message, erro
 func GetBody(msg *gmail.Message) string {
 	// Logic to decode body from parts (text/plain vs text/html)
 	// Simplified:
+	if msg == nil || msg.Payload == nil || msg.Payload.Body == nil {
+		return ""
+	}
 	if msg.Payload.Body.Data != "" {
 		data, _ := base64.URLEncoding.DecodeString(msg.Payload.Body.Data)
 		return string(data)

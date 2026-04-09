@@ -1,7 +1,6 @@
 package vault
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +10,7 @@ import (
 
 func TestTemplateEngine(t *testing.T) {
 	// Setup temporary template directory
-	tmpDir, err := ioutil.TempDir("", "vault-test")
+	tmpDir, err := os.MkdirTemp("", "vault-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +18,7 @@ func TestTemplateEngine(t *testing.T) {
 
 	// Create a dummy template
 	tmplContent := "---\ncreated: {{date:YYYY-MM-DD}}\n---\n# {{title}}"
-	err = ioutil.WriteFile(filepath.Join(tmpDir, "Test Template.md"), []byte(tmplContent), 0644)
+	err = os.WriteFile(filepath.Join(tmpDir, "Test Template.md"), []byte(tmplContent), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +47,7 @@ func TestTemplateEngine(t *testing.T) {
 }
 
 func TestReadWriteNote(t *testing.T) {
-	tmpDir, err := ioutil.TempDir("", "vault-test-rw")
+	tmpDir, err := os.MkdirTemp("", "vault-test-rw")
 	if err != nil {
 		t.Fatal(err)
 	}

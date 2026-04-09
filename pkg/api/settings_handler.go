@@ -34,6 +34,7 @@ type settingsResponse struct {
 func (h *Handler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.Repo.GetAppSettings()
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to load settings: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -45,12 +46,14 @@ func (h *Handler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var req updateSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	provider := strings.ToLower(strings.TrimSpace(req.AIProvider))
 	if provider != "" && provider != "openai" && provider != "anthropic" {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "ai_provider must be one of: openai, anthropic, or empty", http.StatusBadRequest)
 		return
 	}
@@ -60,12 +63,14 @@ func (h *Handler) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		tz = "UTC"
 	}
 	if _, err := time.LoadLocation(tz); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "invalid automation_timezone", http.StatusBadRequest)
 		return
 	}
 
 	settings, err := h.Repo.GetAppSettings()
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to load settings: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -82,6 +87,7 @@ func (h *Handler) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	settings.DiscordToken = applySecretUpdate(settings.DiscordToken, req.DiscordToken, req.ClearDiscordToken)
 
 	if err := h.Repo.UpsertAppSettings(settings); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to save settings: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

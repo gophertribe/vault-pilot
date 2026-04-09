@@ -34,6 +34,7 @@ type updateAutomationRequest struct {
 func (h *Handler) HandleCreateAutomation(w http.ResponseWriter, r *http.Request) {
 	var req createAutomationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -43,6 +44,7 @@ func (h *Handler) HandleCreateAutomation(w http.ResponseWriter, r *http.Request)
 	req.ScheduleKind = strings.TrimSpace(strings.ToLower(req.ScheduleKind))
 	req.ScheduleExpr = strings.TrimSpace(req.ScheduleExpr)
 	if req.Name == "" || req.ActionType == "" || req.ScheduleKind == "" || req.ScheduleExpr == "" {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "name, action_type, schedule_kind and schedule_expr are required", http.StatusBadRequest)
 		return
 	}
@@ -53,6 +55,7 @@ func (h *Handler) HandleCreateAutomation(w http.ResponseWriter, r *http.Request)
 	}
 	nextRun, err := automation.NextRun(req.ScheduleKind, req.ScheduleExpr, tz, time.Now().UTC())
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "invalid schedule: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -61,6 +64,7 @@ func (h *Handler) HandleCreateAutomation(w http.ResponseWriter, r *http.Request)
 	if len(req.Payload) > 0 {
 		payload = req.Payload
 		if !json.Valid(payload) {
+			w.Header().Set("Content-Type", "application/json")
 			http.Error(w, "payload must be valid JSON", http.StatusBadRequest)
 			return
 		}
@@ -83,11 +87,13 @@ func (h *Handler) HandleCreateAutomation(w http.ResponseWriter, r *http.Request)
 	}
 	id, err := h.Repo.CreateAutomation(def)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to create automation: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	created, err := h.Repo.GetAutomationByID(id)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to fetch created automation: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -97,6 +103,7 @@ func (h *Handler) HandleCreateAutomation(w http.ResponseWriter, r *http.Request)
 func (h *Handler) HandleListAutomations(w http.ResponseWriter, r *http.Request) {
 	defs, err := h.Repo.ListAutomations()
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to list automations: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -110,16 +117,19 @@ func (h *Handler) HandleUpdateAutomation(w http.ResponseWriter, r *http.Request)
 	}
 	current, err := h.Repo.GetAutomationByID(id)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to load automation: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if current == nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "automation not found", http.StatusNotFound)
 		return
 	}
 
 	var req updateAutomationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -145,6 +155,7 @@ func (h *Handler) HandleUpdateAutomation(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Payload != nil {
 		if !json.Valid(*req.Payload) {
+			w.Header().Set("Content-Type", "application/json")
 			http.Error(w, "payload must be valid JSON", http.StatusBadRequest)
 			return
 		}
@@ -155,23 +166,27 @@ func (h *Handler) HandleUpdateAutomation(w http.ResponseWriter, r *http.Request)
 	}
 
 	if current.Name == "" || current.ActionType == "" || current.ScheduleKind == "" || current.ScheduleExpr == "" {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "name, action_type, schedule_kind and schedule_expr are required", http.StatusBadRequest)
 		return
 	}
 
 	nextRun, err := automation.NextRun(current.ScheduleKind, current.ScheduleExpr, current.Timezone, time.Now().UTC())
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "invalid schedule: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	current.NextRunAt = nextRun
 
 	if err := h.Repo.UpdateAutomation(current); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to update automation: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	updated, err := h.Repo.GetAutomationByID(current.ID)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to fetch automation: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -185,14 +200,17 @@ func (h *Handler) HandleRunAutomationNow(w http.ResponseWriter, r *http.Request)
 	}
 	current, err := h.Repo.GetAutomationByID(id)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to load automation: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if current == nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "automation not found", http.StatusNotFound)
 		return
 	}
 	if err := h.Repo.TriggerAutomationNow(id, time.Now().UTC()); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "failed to trigger automation: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -203,6 +221,7 @@ func parseIDPath(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return 0, false
 	}

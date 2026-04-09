@@ -2,7 +2,7 @@ package vault
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -28,7 +28,7 @@ func (e *TemplateEngine) LoadTemplate(templateName string) (string, error) {
 	}
 
 	path := fmt.Sprintf("%s/%s", e.TemplateDir, templateName)
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}

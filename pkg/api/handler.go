@@ -65,6 +65,7 @@ type CreateInboxRequest struct {
 func (h *Handler) HandleCreateInboxItem(w http.ResponseWriter, r *http.Request) {
 	var req CreateInboxRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -74,9 +75,11 @@ func (h *Handler) HandleCreateInboxItem(w http.ResponseWriter, r *http.Request) 
 	analysisJSON, err := h.aiForRequest().GenerateText(r.Context(), prompt)
 	if err != nil {
 		if errors.Is(err, ai.ErrNotConfigured) {
+			w.Header().Set("Content-Type", "application/json")
 			http.Error(w, "AI provider not configured; configure in Settings", http.StatusServiceUnavailable)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, fmt.Sprintf("AI analysis failed: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -100,6 +103,7 @@ func (h *Handler) HandleCreateInboxItem(w http.ResponseWriter, r *http.Request) 
 	// 2. Create file using Vault Controller
 	err = vault.CreateInboxItem(h.VaultPath, h.TmplEngine, analysis.Title, analysis.Description)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, fmt.Sprintf("Failed to create file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -113,6 +117,7 @@ func (h *Handler) HandleCreateInboxItem(w http.ResponseWriter, r *http.Request) 
 		}()
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"status": "created", "title": analysis.Title})
 }
@@ -123,9 +128,10 @@ func (h *Handler) HandleListProjects(w http.ResponseWriter, r *http.Request) {
 	projectsDir := filepath.Join(h.VaultPath, "3. Projects")
 	var activeProjects []string
 
-	err := filepath.Walk(projectsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	var err error
+	err = filepath.Walk(projectsDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
 			// Read note to check status
@@ -145,10 +151,12 @@ func (h *Handler) HandleListProjects(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, fmt.Sprintf("Failed to scan projects: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"projects": activeProjects})
 }
 
@@ -189,9 +197,11 @@ func (h *Handler) HandleGenerateWeeklyReview(w http.ResponseWriter, r *http.Requ
 	aiResponse, err := h.aiForRequest().GenerateText(r.Context(), prompt)
 	if err != nil {
 		if errors.Is(err, ai.ErrNotConfigured) {
+			w.Header().Set("Content-Type", "application/json")
 			http.Error(w, "AI provider not configured; configure in Settings", http.StatusServiceUnavailable)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, fmt.Sprintf("AI generation failed: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -200,6 +210,7 @@ func (h *Handler) HandleGenerateWeeklyReview(w http.ResponseWriter, r *http.Requ
 	// Load Weekly Review Template
 	tmpl, err := h.TmplEngine.LoadTemplate("Weekly Review Template")
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -260,10 +271,12 @@ func (h *Handler) HandleGenerateWeeklyReview(w http.ResponseWriter, r *http.Requ
 	// Refactor Writer to have a WriteFileContent method?
 	// Or just use ioutil.WriteFile here.
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, fmt.Sprintf("Failed to create dir: %v", err), http.StatusInternalServerError)
 		return
 	}
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, fmt.Sprintf("Failed to write file: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -281,6 +294,7 @@ func (h *Handler) HandleGenerateWeeklyReview(w http.ResponseWriter, r *http.Requ
 		}()
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"status": "created", "path": filename})
 }

@@ -2,7 +2,6 @@ package vault
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +27,7 @@ func WriteNote(note *Note) error {
 	}
 
 	// Write file
-	if err := ioutil.WriteFile(note.Path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(note.Path, []byte(content), 0644); err != nil {
 		return err
 	}
 
@@ -69,7 +68,7 @@ func CreateInboxItem(vaultPath string, templateEngine *TemplateEngine, title str
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	return ioutil.WriteFile(path, []byte(rendered), 0644)
+	return os.WriteFile(path, []byte(rendered), 0644)
 }
 
 // SanitizeFilename removes characters invalid in filenames.
