@@ -226,7 +226,6 @@ func runServer() error {
 				if err != nil {
 					log.Printf("Failed to create Gemini client: %v", err)
 				} else {
-					defer geminiClient.Close()
 					aiClient = geminiClient
 				}
 			}
